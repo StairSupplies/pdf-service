@@ -26,7 +26,7 @@ func Watermark(w http.ResponseWriter, r *http.Request) {
 	text := r.Header.Get("X-Watermark-Text")
 	if text == "" {
 		log.Warn().Str("path", r.URL.Path).Msg("missing required header X-Watermark-Text")
-		http.Error(w, `{"error":"X-Watermark-Text header is required"}`, http.StatusBadRequest)
+		jsonError(w, "X-Watermark-Text header is required", http.StatusBadRequest)
 		return
 	}
 
@@ -39,21 +39,21 @@ func Watermark(w http.ResponseWriter, r *http.Request) {
 	var err error
 	params.Opacity, err = parseFloat(headerWithDefault(r, "X-Watermark-Opacity", "0.5"))
 	if err != nil {
-		http.Error(w, `{"error":"X-Watermark-Opacity must be a number"}`, http.StatusBadRequest)
+		jsonError(w, "X-Watermark-Opacity must be a number", http.StatusBadRequest)
 		return
 	}
 
 	sizeStr := headerWithDefault(r, "X-Watermark-Size", "60")
 	size, err := strconv.Atoi(sizeStr)
 	if err != nil {
-		http.Error(w, `{"error":"X-Watermark-Size must be an integer"}`, http.StatusBadRequest)
+		jsonError(w, "X-Watermark-Size must be an integer", http.StatusBadRequest)
 		return
 	}
 	params.Size = size
 
 	params.Angle, err = parseFloat(headerWithDefault(r, "X-Watermark-Angle", "0"))
 	if err != nil {
-		http.Error(w, `{"error":"X-Watermark-Angle must be a number"}`, http.StatusBadRequest)
+		jsonError(w, "X-Watermark-Angle must be a number", http.StatusBadRequest)
 		return
 	}
 
@@ -74,6 +74,12 @@ func Watermark(w http.ResponseWriter, r *http.Request) {
 		"status": "accepted",
 		"text":   escapedText,
 	})
+}
+
+func jsonError(w http.ResponseWriter, message string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": message}) //nolint:errcheck
 }
 
 func headerWithDefault(r *http.Request, key, def string) string {
