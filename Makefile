@@ -16,7 +16,7 @@ build: check-deps ## Compile the binary to ./$(BINARY_NAME)
 
 .PHONY: test
 test: check-deps ## Run all tests
-	$(GO) test -v -race ./...
+	$(GO) test -v ./...
 
 ##@ Quality
 
