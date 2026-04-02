@@ -1,0 +1,19 @@
+# Compiled binary
+/pdf-service
+
+# Test cache
+/tmp/
+
+# Environment overrides
+.env
+.env.local
+
+# Editor directories
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS metadata
+.DS_Store
+Thumbs.db
