@@ -18,6 +18,24 @@ build: check-deps ## Compile the binary to ./$(BINARY_NAME)
 test: check-deps ## Run all tests
 	$(GO) test -v ./...
 
+##@ Docker
+
+.PHONY: docker-build
+docker-build: ## Build the Docker image tagged pdf-service:local
+	docker build -t pdf-service:local .
+
+.PHONY: docker-smoke
+docker-smoke: docker-build ## Build image, start container, verify /health responds, then stop
+	@echo "Starting pdf-service container..."
+	@docker run -d --rm --name pdf-service-smoke -p 18080:8080 pdf-service:local
+	@sleep 1
+	@echo "Checking GET /health..."
+	@curl -sf http://localhost:18080/health | grep -q '"ok"' \
+		&& echo "PASS: /health returned ok" \
+		|| { echo "FAIL: /health check failed"; docker stop pdf-service-smoke; exit 1; }
+	@docker stop pdf-service-smoke
+	@echo "Smoke test passed."
+
 ##@ Quality
 
 .PHONY: check-deps
