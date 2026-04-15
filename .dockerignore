@@ -1,0 +1,8 @@
+# Git history — the biggest build-context offender; never needed inside the image.
+.git
+
+# Locally compiled binary (built inside the container, not from the host).
+/pdf-service
+
+# Compiled Go test binaries.
+*.test

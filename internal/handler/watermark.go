@@ -1,19 +1,28 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/rs/zerolog/log"
 
 	"github.com/StairSupplies/pdf-service/internal/latex"
 )
+
+// PdflatexTimeout is the per-request deadline applied to both pdflatex passes combined.
+// It is set from the PDFLATEX_TIMEOUT environment variable (in seconds) at startup;
+// the default of 55 s gives comfortable headroom for large PDFs while remaining well
+// within a reasonably configured HTTP write timeout.
+var PdflatexTimeout = 55 * time.Second
 
 // Watermark handles POST /watermark.
 //
@@ -56,9 +65,22 @@ func Watermark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce a 120 MB body limit to guard against accidental or malicious oversized uploads.
+	const maxBodyBytes = 120 << 20
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+
 	// Read PDF body.
 	pdfBytes, err := io.ReadAll(r.Body)
-	if err != nil || len(pdfBytes) == 0 {
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			jsonError(w, "request body exceeds the 120 MB limit", http.StatusRequestEntityTooLarge)
+			return
+		}
+		jsonError(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+	if len(pdfBytes) == 0 {
 		jsonError(w, "request body must be a non-empty PDF", http.StatusBadRequest)
 		return
 	}
@@ -84,7 +106,9 @@ func Watermark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pdflatexOut, err := latex.RunPdflatex(tmpDir)
+	ctx, cancel := context.WithTimeout(r.Context(), PdflatexTimeout)
+	defer cancel()
+	pdflatexOut, err := latex.RunPdflatex(ctx, tmpDir)
 	if err != nil {
 		log.Error().Err(err).Msg("pdflatex failed")
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")

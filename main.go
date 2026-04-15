@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -20,6 +21,12 @@ func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
+	}
+
+	if s := os.Getenv("PDFLATEX_TIMEOUT"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			handler.PdflatexTimeout = time.Duration(n) * time.Second
+		}
 	}
 
 	mux := http.NewServeMux()

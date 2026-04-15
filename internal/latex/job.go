@@ -2,6 +2,7 @@ package latex
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -115,11 +116,14 @@ func WriteJobTex(dir string, p Params) error {
 // RunPdflatex runs pdflatex on job.tex inside dir (also used as cwd and output dir).
 // Two passes are required: the first pass writes TikZ overlay coordinates to the .aux
 // file; the second pass reads them to correctly position the watermark on the page.
+// The provided context is honoured across both passes — cancelling it (e.g. via a
+// timeout) kills the running pdflatex process and returns immediately.
 // On failure it returns the combined stdout+stderr together with the error so the
 // caller can relay it to the client.
-func RunPdflatex(dir string) ([]byte, error) {
+func RunPdflatex(ctx context.Context, dir string) ([]byte, error) {
 	for range 2 {
-		cmd := exec.Command(
+		cmd := exec.CommandContext(
+			ctx,
 			"pdflatex",
 			"-interaction=nonstopmode",
 			"-output-directory", dir,
