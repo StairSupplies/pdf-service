@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
 	"github.com/StairSupplies/pdf-service/internal/handler"
+	"github.com/StairSupplies/pdf-service/internal/middleware"
 )
 
 func main() {
@@ -29,22 +33,51 @@ func main() {
 		}
 	}
 
+	writeTimeout := 30 * time.Second
+	if s := os.Getenv("WRITE_TIMEOUT"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			writeTimeout = time.Duration(n) * time.Second
+		}
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handler.Health)
-	mux.HandleFunc("POST /watermark", handler.Watermark)
+	mux.Handle("POST /watermark", middleware.Auth(http.HandlerFunc(handler.Watermark)))
 
 	srv := &http.Server{
 		Addr:         ":" + port,
 		Handler:      loggingMiddleware(mux),
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: writeTimeout,
 		IdleTimeout:  60 * time.Second,
 	}
 
-	log.Info().Str("port", port).Msg("pdf-service starting")
+	serverErr := make(chan error, 1)
+	go func() {
+		log.Info().Str("port", port).Msg("pdf-service starting")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			serverErr <- err
+		}
+	}()
 
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+
+	select {
+	case err := <-serverErr:
 		log.Fatal().Err(err).Msg("server failed")
+	case <-ctx.Done():
+		log.Info().Msg("shutdown signal received; draining in-flight requests")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Error().Err(err).Msg("graceful shutdown failed; forcing close")
+		srv.Close() //nolint:errcheck
+	} else {
+		log.Info().Msg("shutdown complete")
 	}
 }
 
