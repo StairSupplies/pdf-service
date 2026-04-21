@@ -49,7 +49,7 @@ Body: raw PDF bytes (`Content-Type: application/pdf`). Maximum 120 MB.
 | `PDF_SERVICE_API_KEY` | _(unset)_ | Bearer token for auth. When unset, all requests pass through unauthenticated. |
 | `PORT` | `8080` | Port the HTTP server listens on. |
 | `PDFLATEX_TIMEOUT` | `55` | Per-request pdflatex timeout in seconds (covers both passes). |
-| `WRITE_TIMEOUT` | `60` | HTTP server write timeout in seconds. Should exceed `PDFLATEX_TIMEOUT`. |
+| `WRITE_TIMEOUT` | `30` | HTTP server write timeout in seconds. Set higher (e.g. `120`) when processing large PDFs. |
 | `APP_ENV` | _(unset)_ | Set to `production` for structured JSON logging; omit for human-readable console output. |
 
 ## Running Locally

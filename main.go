@@ -33,7 +33,7 @@ func main() {
 		}
 	}
 
-	writeTimeout := 60 * time.Second
+	writeTimeout := 30 * time.Second
 	if s := os.Getenv("WRITE_TIMEOUT"); s != "" {
 		if n, err := strconv.Atoi(s); err == nil && n > 0 {
 			writeTimeout = time.Duration(n) * time.Second
