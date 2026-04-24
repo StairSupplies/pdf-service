@@ -42,7 +42,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handler.Health)
-	mux.Handle("POST /watermark", middleware.Auth(http.HandlerFunc(handler.Watermark)))
+	mux.Handle("POST /watermark", middleware.Auth(os.Getenv("PDF_SERVICE_API_KEY"))(http.HandlerFunc(handler.Watermark)))
 
 	srv := &http.Server{
 		Addr:         ":" + port,
