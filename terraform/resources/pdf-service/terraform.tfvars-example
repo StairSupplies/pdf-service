@@ -1,0 +1,40 @@
+# ===============================
+# EKS Configuration
+# ===============================
+
+region        = "us-east-2"
+app_namespace = "terminal"
+
+# ===============================
+# Docker
+# ===============================
+
+app_name          = "pdf-service"
+image_repo        = "stairsupplies/pdf-service"
+image_tag         = ""            # Injected by deployment script from branch name
+image_pull_secret = "dockerhub"
+
+# ===============================
+# Resources
+# These are conservative starting values based on expected runtime profile:
+# Go process ~30MB + pdflatex subprocess peak ~200MB = ~230MB typical peak.
+# Validate with real load before adjusting — raise limits_memory if OOMKilled.
+# Staging:    replica_count=1, requests 128Mi/250m, limits 512Mi/500m
+# Production: replica_count=2, requests 128Mi/250m, limits 512Mi/500m
+# ===============================
+
+replica_count   = 1
+requests_memory = "128Mi"
+requests_cpu    = "250m"
+limits_memory   = "512Mi"
+limits_cpu      = "500m"
+
+# ===============================
+# App Configuration
+# ===============================
+
+app_env          = "production"
+app_port         = 8080
+api_key          = ""             # Set via GitHub Environment secret
+pdflatex_timeout = "55"
+write_timeout    = "120"          # Must exceed pdflatex_timeout + request overhead
