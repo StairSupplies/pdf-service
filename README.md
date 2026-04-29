@@ -75,10 +75,17 @@ make docker-build        # build image tagged pdf-service:local
 make docker-smoke        # build, start, verify /health, stop
 ```
 
-Or manually:
+Or manually (port 3006 is the local dev convention so it doesn't collide with the app server):
 
 ```bash
-docker run -d --rm -p 8080:8080 -e PDF_SERVICE_API_KEY=secret pdf-service:local
+docker build -t pdf-service:local .
+docker run -d --name pdf-service -p 3006:8080 pdf-service:local
+```
+
+Verify:
+
+```bash
+curl http://localhost:3006/health
 ```
 
 ## Tests
@@ -100,12 +107,25 @@ git push origin v1.2.0
 
 ## terminal-docker Integration
 
-In `docker-compose.yml` the service runs at host port `3006`. Configure via `.env`:
+pdf-service is a standalone API — it is **not** part of terminal-docker's compose stack. Run it separately (see Docker above), then point terminal at it.
+
+**Step 1:** Build and start pdf-service:
+
+```bash
+docker build -t pdf-service:local .
+docker run -d --name pdf-service -p 3006:8080 pdf-service:local
+```
+
+**Step 2:** Add to your terminal-docker `.env`:
 
 ```dotenv
-PANDOC_SERVICE_URL=http://pdf-service:8080
-PANDOC_SERVICE_API_KEY=your-secret-key
+PANDOC_SERVICE_URL=http://host.docker.internal:3006
+PANDOC_SERVICE_API_KEY=
 PANDOC_SERVICE_TIMEOUT=60
 ```
 
-The matching `PDF_SERVICE_API_KEY` must be set on the `pdf-service` container for auth to be enforced.
+Leave `PANDOC_SERVICE_API_KEY` empty for local dev — the service runs without auth when `PDF_SERVICE_API_KEY` is unset.
+
+**Step 3:** Start terminal normally with `docker compose up`.
+
+In staging and production the service is deployed as a Kubernetes ClusterIP in the `terminal` namespace. Consumers reach it at `http://pdf-service.terminal.svc.cluster.local:8080` with a bearer token set via `PANDOC_SERVICE_API_KEY`.
