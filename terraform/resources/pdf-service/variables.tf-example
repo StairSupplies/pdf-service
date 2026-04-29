@@ -1,0 +1,97 @@
+# ===============================
+# EKS Configuration
+# ===============================
+
+variable "region" {
+  description = "AWS region"
+  type        = string
+  default     = "us-east-2"
+}
+
+variable "app_namespace" {
+  description = "Kubernetes namespace to deploy into"
+  type        = string
+}
+
+# ===============================
+# Docker
+# ===============================
+
+variable "app_name" {
+  description = "Name of the K8s Deployment and Service"
+  type        = string
+}
+
+variable "image_repo" {
+  description = "Docker image repository (e.g. stairsupplies/pdf-service)"
+  type        = string
+}
+
+variable "image_tag" {
+  description = "Docker image tag — set by the deployment script from the branch name"
+  type        = string
+}
+
+variable "image_pull_secret" {
+  description = "Kubernetes image pull secret name"
+  type        = string
+}
+
+# ===============================
+# Resources
+# ===============================
+
+variable "replica_count" {
+  description = "Number of pod replicas"
+  type        = number
+}
+
+variable "requests_memory" {
+  description = "Memory request per pod"
+  type        = string
+}
+
+variable "requests_cpu" {
+  description = "CPU request per pod"
+  type        = string
+}
+
+variable "limits_memory" {
+  description = "Memory limit per pod"
+  type        = string
+}
+
+variable "limits_cpu" {
+  description = "CPU limit per pod"
+  type        = string
+}
+
+# ===============================
+# App Configuration
+# ===============================
+
+variable "app_env" {
+  description = "APP_ENV value passed to the container"
+  type        = string
+}
+
+variable "app_port" {
+  description = "Port the service listens on"
+  type        = number
+}
+
+variable "api_key" {
+  description = "Bearer token for PDF_SERVICE_API_KEY (sensitive)"
+  type        = string
+  sensitive   = true
+}
+
+variable "pdflatex_timeout" {
+  description = "Per-request pdflatex timeout in seconds (PDFLATEX_TIMEOUT)"
+  type        = string
+}
+
+variable "write_timeout" {
+  description = "HTTP server write timeout in seconds (WRITE_TIMEOUT); must exceed pdflatex_timeout"
+  type        = string
+}

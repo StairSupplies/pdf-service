@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${app_name}
+  namespace: ${app_namespace}
+spec:
+  replicas: ${replica_count}
+  selector:
+    matchLabels:
+      app: ${app_name}
+  template:
+    metadata:
+      labels:
+        app: ${app_name}
+    spec:
+      containers:
+      - name: ${app_name}
+        image: ${image_repo}:${image_tag}
+        imagePullPolicy: ${image_pull_policy}
+        ports:
+        - containerPort: ${app_port}
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: ${app_port}
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "${requests_memory}"
+            cpu: "${requests_cpu}"
+          limits:
+            memory: "${limits_memory}"
+            cpu: "${limits_cpu}"
+        env:
+        - name: APP_ENV
+          value: "${app_env}"
+        - name: PORT
+          value: "${app_port}"
+        - name: PDF_SERVICE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ${secret_name}
+              key: api_key
+        - name: PDFLATEX_TIMEOUT
+          value: "${pdflatex_timeout}"
+        - name: WRITE_TIMEOUT
+          value: "${write_timeout}"
+%{~ if image_pull_secret != "" }
+      imagePullSecrets:
+      - name: ${image_pull_secret}
+%{~ endif ~}

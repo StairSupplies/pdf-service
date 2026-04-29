@@ -1,0 +1,179 @@
+name: K8s - Deploy PDF Service
+run-name: Deploy PDF Service - ${{ inputs.deploymentEnvironment }} by @${{ github.actor }}
+
+concurrency:
+  group: k8s-pdf-service-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploymentEnvironment:
+        description: "Environment"
+        required: true
+        type: choice
+        default: staging
+        options:
+          - production
+          - staging
+      deploymentBranch:
+        description: "Branch (App)"
+        required: true
+        type: string
+        default: master
+      cluster:
+        description: "EKS Cluster"
+        required: false
+        type: choice
+        default: terminal-eks-cluster
+        options:
+          - terminal-eks-cluster
+          - sdlc-eks-cluster
+
+jobs:
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.deploymentEnvironment }}
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      TF_VERSION: 1.11.4
+      DEPLOYMENT_LAYER: pdf-service
+
+    steps:
+      - name: Inputs
+        run: |
+          echo "Current Repo Branch: ${{ github.ref_name }}"
+          echo "Deployment Environment: ${{ github.event.inputs.deploymentEnvironment }}"
+          echo "Deployment Branch: ${{ github.event.inputs.deploymentBranch }}"
+          echo "EKS Cluster: ${{ github.event.inputs.cluster }}"
+          echo "Deployment Layer: ${{ env.DEPLOYMENT_LAYER }}"
+
+      - name: Check allowed users
+        run: |
+          ALLOWED_USERS="lotharthesavior erevollo-gh sethstairsupplies ncunningham-stairsupplies killean-johnson segotafilip"
+          if [[ ! " $ALLOWED_USERS " =~ " ${{ github.actor }} " ]]; then
+            echo "User ${{ github.actor }} is not allowed to run this workflow."
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS Credentials - Terminal
+        uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ github.event.inputs.cluster == 'terminal-eks-cluster' }}
+        with:
+          aws-access-key-id: ${{ secrets.MAIN_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.MAIN_AWS_SECRET_ACCESS_KEY }}
+          aws-region: "${{ secrets.EKS_CLUSTER_REGION }}"
+
+      - name: Configure AWS Credentials - SDLC
+        uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ github.event.inputs.cluster == 'sdlc-eks-cluster' }}
+        with:
+          aws-access-key-id: ${{ secrets.SDLC_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.SDLC_AWS_SECRET_ACCESS_KEY }}
+          aws-region: "${{ secrets.SDLC_EKS_CLUSTER_REGION }}"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Configure K8s access
+        run: |
+          cluster_name="staging-${{ github.event.inputs.cluster }}"
+          if [ "${{ github.event.inputs.deploymentEnvironment }}" == "production" ]; then
+            cluster_name="prod-${{ github.event.inputs.cluster }}"
+          fi
+
+          region="${{ secrets.EKS_CLUSTER_REGION }}"
+          if [ "${{ github.event.inputs.cluster }}" == "sdlc-eks-cluster" ]; then
+            region="${{ secrets.SDLC_EKS_CLUSTER_REGION }}"
+          fi
+
+          aws eks --region $region update-kubeconfig --name $cluster_name
+
+      - name: Get commit hash
+        id: get_commit
+        run: echo "commit_hash=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Prepare Image Tag
+        run: |
+          IMAGE_TAG=$(echo "${{ github.event.inputs.deploymentBranch }}" | awk -F'/' '{print $NF}' | tr '[:upper:]' '[:lower:]' | cut -c1-20 | sed 's/[^a-z0-9-]//g' | sed 's/-$//')
+
+          if [ "${IMAGE_TAG}" = "master" ]; then
+            IMAGE_TAG="${{ github.event.inputs.deploymentEnvironment }}"
+          fi
+
+          echo "Image name: ${IMAGE_TAG}"
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
+
+      - name: Build and push PDF Service Docker image
+        run: |
+          cd pdf-service
+          docker build -t stairsupplies/pdf-service:${{ env.IMAGE_TAG }} .
+          docker push stairsupplies/pdf-service:${{ env.IMAGE_TAG }}
+
+      - name: Write Terraform Variables & State
+        run: |
+          # variables
+          cat <<EOF >> terraform.tfvars
+          ${{ secrets.PDF_SERVICE_TERRAFORM_VARS }}
+          EOF
+
+          # state
+          cat <<EOF >> terraformstate.hcl
+          ${{ secrets.PDF_SERVICE_STATE_HCL }}
+          EOF
+
+      - name: Deploy
+        id: deploy
+        run: |
+          bash scripts/k8s-run-tf.sh \
+            -l ${{ env.DEPLOYMENT_LAYER }} \
+            -e ${{ github.event.inputs.deploymentEnvironment }} \
+            -a apply \
+            -t ${{ env.IMAGE_TAG }} \
+            -w ${{ env.IMAGE_TAG }} \
+            -d "viewrail.com" \
+            -u ${{ github.event.inputs.cluster }} \
+            -i ""
+
+          echo "DEPLOYMENT_NAME=$(terraform output -raw app_name)" >> $GITHUB_ENV
+          echo "APP_NAMESPACE=$(terraform output -raw app_namespace)" >> $GITHUB_ENV
+
+          echo "file_path=terraform.tfvars" >> $GITHUB_OUTPUT
+
+      - name: Force Rollout new PDF Service Deployment
+        run: |
+          kubectl rollout restart deployment -n ${{ env.APP_NAMESPACE }} ${{ env.DEPLOYMENT_NAME }}
+
+      - name: Add Terraform Vars Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdf-service-terraform-vars-${{ github.sha }}
+          path: ${{ steps.deploy.outputs.file_path }}
+          retention-days: 7
+          overwrite: true
+
+      - name: Summary
+        run: |
+          echo "## Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "PDF Service deployed to namespace \`${{ env.APP_NAMESPACE }}\` as \`${{ env.DEPLOYMENT_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Accessible within the cluster at: \`http://${{ env.DEPLOYMENT_NAME }}.${{ env.APP_NAMESPACE }}.svc.cluster.local:8080\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Environment: ${{ github.event.inputs.deploymentEnvironment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Cluster: ${{ github.event.inputs.cluster }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Layer: ${{ env.DEPLOYMENT_LAYER }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: ${{ github.event.inputs.deploymentBranch }}" >> $GITHUB_STEP_SUMMARY

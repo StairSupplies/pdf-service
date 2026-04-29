@@ -1,0 +1,143 @@
+name: K8s - Destroy PDF Service
+run-name: Destroy PDF Service - ${{ inputs.deploymentEnvironment }} by @${{ github.actor }} - ${{ inputs.cluster }}
+
+concurrency:
+  group: k8s-pdf-service-destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploymentEnvironment:
+        description: "Environment"
+        required: true
+        type: choice
+        default: staging
+        options:
+          - production
+          - staging
+      deploymentBranch:
+        description: "Branch (App)"
+        required: true
+        type: string
+        default: master
+      cluster:
+        description: "EKS Cluster"
+        required: false
+        type: choice
+        default: terminal-eks-cluster
+        options:
+          - terminal-eks-cluster
+          - sdlc-eks-cluster
+
+jobs:
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.deploymentEnvironment }}
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      TF_VERSION: 1.11.4
+      DEPLOYMENT_LAYER: pdf-service
+
+    steps:
+      - name: Inputs
+        run: |
+          echo "Current Repo Branch: ${{ github.ref_name }}"
+          echo "Deployment Environment: ${{ github.event.inputs.deploymentEnvironment }}"
+          echo "Deployment Branch: ${{ github.event.inputs.deploymentBranch }}"
+          echo "EKS Cluster: ${{ github.event.inputs.cluster }}"
+          echo "Deployment Layer: ${{ env.DEPLOYMENT_LAYER }}"
+
+      - name: Check allowed users
+        run: |
+          ALLOWED_USERS="lotharthesavior erevollo-gh sethstairsupplies ncunningham-stairsupplies killean-johnson segotafilip"
+          if [[ ! " $ALLOWED_USERS " =~ " ${{ github.actor }} " ]]; then
+            echo "User ${{ github.actor }} is not allowed to run this workflow."
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS Credentials - Terminal
+        uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ github.event.inputs.cluster == 'terminal-eks-cluster' }}
+        with:
+          aws-access-key-id: ${{ secrets.MAIN_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.MAIN_AWS_SECRET_ACCESS_KEY }}
+          aws-region: "${{ secrets.EKS_CLUSTER_REGION }}"
+
+      - name: Configure AWS Credentials - SDLC
+        uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ github.event.inputs.cluster == 'sdlc-eks-cluster' }}
+        with:
+          aws-access-key-id: ${{ secrets.SDLC_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.SDLC_AWS_SECRET_ACCESS_KEY }}
+          aws-region: "${{ secrets.SDLC_EKS_CLUSTER_REGION }}"
+
+      - name: Configure K8s access
+        run: |
+          cluster_name="staging-${{ github.event.inputs.cluster }}"
+          if [ "${{ github.event.inputs.deploymentEnvironment }}" == "production" ]; then
+            cluster_name="prod-${{ github.event.inputs.cluster }}"
+          fi
+
+          region="${{ secrets.EKS_CLUSTER_REGION }}"
+          if [ "${{ github.event.inputs.cluster }}" == "sdlc-eks-cluster" ]; then
+            region="${{ secrets.SDLC_EKS_CLUSTER_REGION }}"
+          fi
+
+          aws eks --region $region update-kubeconfig --name $cluster_name
+
+      - name: Prepare Image Tag
+        run: |
+          IMAGE_TAG=$(echo "${{ github.event.inputs.deploymentBranch }}" | awk -F'/' '{print $NF}' | tr '[:upper:]' '[:lower:]' | cut -c1-20 | sed 's/[^a-z0-9-]//g' | sed 's/-$//')
+
+          if [ "${IMAGE_TAG}" = "master" ]; then
+            IMAGE_TAG="${{ github.event.inputs.deploymentEnvironment }}"
+          fi
+
+          echo "Image name: ${IMAGE_TAG}"
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
+
+      - name: Write Terraform Variables & State
+        run: |
+          # variables
+          cat <<EOF >> terraform.tfvars
+          ${{ secrets.PDF_SERVICE_TERRAFORM_VARS }}
+          EOF
+
+          # state
+          cat <<EOF >> terraformstate.hcl
+          ${{ secrets.PDF_SERVICE_STATE_HCL }}
+          EOF
+
+      - name: Destroy
+        run: |
+          bash scripts/k8s-run-tf.sh \
+            -l ${{ env.DEPLOYMENT_LAYER }} \
+            -e ${{ github.event.inputs.deploymentEnvironment }} \
+            -a destroy \
+            -t ${{ env.IMAGE_TAG }} \
+            -w ${{ env.IMAGE_TAG }} \
+            -d "viewrail.com" \
+            -u ${{ github.event.inputs.cluster }} \
+            -i "" \
+            -c ""
+
+      - name: Summary
+        run: |
+          echo "## Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Environment: ${{ github.event.inputs.deploymentEnvironment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Layer: ${{ env.DEPLOYMENT_LAYER }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Cluster: ${{ github.event.inputs.cluster }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: ${{ github.event.inputs.deploymentBranch }}" >> $GITHUB_STEP_SUMMARY
